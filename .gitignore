@@ -1,0 +1,31 @@
+# 1. Entornos virtuales (¡Pesadísimos, nunca se suben!)
+venv/
+env/
+.env
+
+# 2. Archivos temporales y caché de Python
+__pycache__/
+*.pyc
+*.pyo
+
+# 3. Checkpoints de Jupyter Notebooks (si usas libretas para experimentar)
+.ipynb_checkpoints/
+
+# 4. Modelos entrenados y variables guardadas
+*.pt
+*.pth
+*.pkl
+models/
+
+# 5. Datos e Imágenes Médicas (Regla de oro: los datos crudos no van a GitHub)
+data/
+dataset/
+images/
+*.dcm
+*.png
+*.jpg
+*.jpeg
+
+# 6. Archivos basura del sistema operativo (Windows)
+Thumbs.db
+Desktop.ini
