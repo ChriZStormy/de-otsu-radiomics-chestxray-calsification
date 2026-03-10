@@ -1,4 +1,4 @@
-# Optimización de Hiperparámetros con Micro Evolución Diferencial para Segmentación y Clasificación de Neumonía en Radiografías
+# Optimización de Multi-Otsu con Micro Evolución Diferencial Auto-Adaptativa para Segmentación y Clasificación de Neumonía en Radiografías
 
 Este proyecto implementa un *pipeline* avanzado de Visión por Computadora y Machine Learning para la detección de neumonía en imágenes de rayos X de tórax. Utiliza el algoritmo de **Multi-Otsu** optimizado mediante la metaheurística de **Micro Evolución Diferencial Autoadaptativa ($\mu$DE)** para aislar la región de interés (ROI), seguido de extracción de características radiómicas y clasificación mediante Máquinas de Vectores de Soporte (SVM).
 
@@ -23,3 +23,4 @@ El sistema se divide en dos fases principales, separadas para garantizar la inte
 2. **Entrenamiento SVM:** Se entrena un clasificador `SVC(kernel='linear')`.
 3. **Validación Cruzada:** Se utiliza `StratifiedShuffleSplit` (10 folds, 85% Train / 15% Test) con paralelización vía `joblib` para evaluar simultáneamente los datasets generados por los diferentes esquemas evolutivos.
 4. **Métricas:** Se evalúa Accuracy, Recall, F1-Score y AUC, consolidando los resultados en una tabla comparativa final ordenada por exactitud predictiva.
+
