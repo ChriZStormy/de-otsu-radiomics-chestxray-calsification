@@ -9,6 +9,7 @@ __pycache__/
 *.pyo
 *.vscode/
 results
+resultados_segmentacion_umbralizada/
 
 # 3. Checkpoints de Jupyter Notebooks (si usas libretas para experimentar)
 .ipynb_checkpoints/
