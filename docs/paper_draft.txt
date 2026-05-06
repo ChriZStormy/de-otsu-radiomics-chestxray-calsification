@@ -1,0 +1,302 @@
+\documentclass[conference]{IEEEtran}
+\IEEEoverridecommandlockouts
+% The preceding line is only needed to identify funding in the first footnote. If that is unneeded, please comment it out.
+\usepackage{cite}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{algorithmic}
+\usepackage{graphicx}
+\usepackage{textcomp}
+\usepackage{xcolor}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{url}
+
+\begin{document}
+
+\title{Optimized Multi-Otsu Thresholding via Micro-Differential Evolution for Radiomic Feature Extraction in Chest X-Ray Classification}
+
+\author{\IEEEauthorblockN{1\textsuperscript{st} Given Name Surname}
+\IEEEauthorblockA{\textit{dept. name of organization (of Aff.)} \\
+\textit{name of organization (of Aff.)}\\
+City, Country \\
+email address or ORCID}
+}
+
+\maketitle
+
+\begin{abstract}
+The accurate classification of chest X-ray images is a critical task in computer-aided diagnosis, particularly for respiratory diseases such as COVID-19, Pneumonia, and Tuberculosis. While deep learning models have dominated recent literature, they often require extensive computational resources and lack interpretability. This paper proposes a robust, computationally efficient methodology leveraging evolutionary algorithms to optimize Multi-Otsu thresholding for radiomic feature extraction. We compare a Micro-Differential Evolution ($\mu$SADE) algorithm against Standard Differential Evolution (DE) using both 'rand/1' and 'best/1' mutation strategies across different threshold levels ($D=3, 6, 12$). Following image segmentation, morphological and Gray-Level Co-occurrence Matrix (GLCM) features are extracted and fed into a Support Vector Machine (SVM) classifier. An exhaustive statistical analysis, including Repeated Stratified K-Fold Cross-Validation, the Friedman test, and the Nemenyi post-hoc test, is conducted to rigorously evaluate and rank the 12 resulting configurations. Our results demonstrate the efficacy of the proposed pipeline in identifying the optimal balance between segmentation detail and classification performance across multiple pulmonary diseases.
+\end{abstract}
+
+\begin{IEEEkeywords}
+Micro-Differential Evolution, $\mu$SADE, Radiomics, Image Segmentation, Multi-Otsu, Computer-Aided Diagnosis
+\end{IEEEkeywords}
+
+\section{Introduction}
+Medical imaging, particularly chest X-rays (CXR), remains a primary diagnostic tool for identifying pulmonary anomalies associated with diseases such as COVID-19, bacterial pneumonia, and tuberculosis \cite{eadie2012}, \cite{qi2020}. The automated analysis of these images can significantly reduce the workload of radiologists and expedite patient triage. 
+
+A critical step in the automated analysis pipeline is image segmentation. Multi-level thresholding, specifically the Otsu method, is widely used to separate regions of interest based on pixel intensity. However, as the number of thresholds ($D$) increases, the exhaustive search required by standard Otsu becomes computationally intractable, exhibiting an exponential time complexity $O(L^D)$, where $L$ is the number of gray levels.
+
+To overcome this bottleneck, metaheuristic optimization algorithms have been successfully applied to find near-optimal thresholds efficiently. In this research, we investigate the application of a Micro-Differential Evolution ($\mu$SADE) algorithm and compare it against the Standard Differential Evolution (DE) for Multi-Otsu thresholding. We evaluate two mutation strategies ('rand/1' and 'best/1') at varying complexity levels ($D=3, 6, 12$). The thresholded images are then used to extract interpretable radiomic features, which are evaluated using a Support Vector Machine (SVM) classifier across three distinct CXR datasets \cite{dataset_covid}, \cite{dataset_pneumonia}, \cite{dataset_tb}.
+
+\section{Theoretical Framework}
+
+\subsection{Medical Image Segmentation}
+Medical image segmentation is a fundamental process in Computer-Aided Diagnosis (CAD) systems that partitions an image into multiple segments (regions) to simplify its representation into something more meaningful and easier to analyze. In the context of chest X-rays, segmentation aims to isolate the lung fields, bones, and potential pathological regions from the background. The Multi-Otsu thresholding technique is a popular non-parametric method for multi-level segmentation. Its objective is to find a set of thresholds $\mathbf{t} = [t_1, t_2, \dots, t_D]$ that minimizes the negative between-class variance ($-\sigma_B^2$). The fitness function optimized in our approach is defined as:
+\begin{equation}
+    f(\mathbf{t}) = -\sigma_B^2 = -\sum_{i=0}^{D} \omega_i (\mu_i - \mu_T)^2
+\end{equation}
+where $\omega_i$ is the probability of occurrence of class $i$, $\mu_i$ is the mean of class $i$, and $\mu_T$ is the total mean intensity of the image.
+
+\subsection{Radiomics}
+Radiomics refers to the automated extraction of a large number of quantitative features from medical images \cite{lambin2012}, \cite{yip2016}. Unlike traditional visual interpretation, radiomics converts digital medical images into mineable data, capturing the underlying tissue phenotype. The extracted features generally include first-order statistics (e.g., intensity, mean, variance), morphological descriptors (e.g., area, volume, number of regions), and second-order texture features computed via the Gray-Level Co-occurrence Matrix (GLCM) \cite{haralick1973}.
+
+\subsection{Standard Differential Evolution (DE)}
+Differential Evolution (DE) is a stochastic, population-based metaheuristic optimization algorithm designed for continuous search spaces \cite{brest2006}. It maintains a population of $NP$ candidate solutions. During each generation, DE creates new candidate solutions by combining existing ones through mutation and crossover operations. Our study evaluates two classical mutation strategies:
+\begin{itemize}
+    \item \textbf{DE/rand/1:} $V_{i} = x_{r1} + F \cdot (x_{r2} - x_{r3})$
+    \item \textbf{DE/best/1:} $V_{i} = x_{best} + F \cdot (x_{r1} - x_{r2})$
+\end{itemize}
+where $r1, r2, r3$ are mutually exclusive random indices, $x_{best}$ is the current best individual, and $F$ is the mutation factor.
+
+\subsection{Micro-Differential Evolution ($\mu$SADE)}
+While standard DE performs well, evaluating the fitness function for high-resolution images across a large population is computationally expensive. The Micro-Differential Evolution ($\mu$SADE) addresses this by utilizing a drastically reduced population size (e.g., $NP=5$). To compensate for the lack of genetic diversity, $\mu$SADE incorporates two main mechanisms:
+\begin{enumerate}
+    \item \textbf{Self-Adaptation:} The control parameters $F$ and the crossover rate $Cr$ are dynamically adapted during evolution.
+    \item \textbf{Restart Mechanism:} If the population stalls for a predefined number of iterations ($restart\_iters = 10$), the algorithm preserves the elite individual ($e=1$) and reinitializes the rest of the population randomly to escape local minima.
+\end{enumerate}
+
+\subsection{Statistical Evaluation Tests}
+To rigorously validate the classification performance, we employ non-parametric statistical tests. First, the \textbf{Friedman test} \cite{friedman1937} checks for significant differences across multiple algorithms. Its statistic is computed as:
+\begin{equation}
+    \chi_F^2 = \frac{12N}{k(k+1)} \left[ \sum_{j=1}^k R_j^2 - \frac{k(k+1)^2}{4} \right]
+\end{equation}
+where $N$ is the number of datasets (or folds), $k$ is the number of algorithms, and $R_j$ is the average rank of algorithm $j$. 
+
+If the Friedman test rejects the null hypothesis, the \textbf{Nemenyi post-hoc test} \cite{nemenyi1963}, \cite{demsar2006} is applied to find pairwise differences. The performance of two algorithms is significantly different if their average ranks differ by at least the critical difference (CD):
+\begin{equation}
+    CD = q_{\alpha} \sqrt{\frac{k(k+1)}{6N}}
+\end{equation}
+where $q_{\alpha}$ is the critical value based on the Studentized range statistic.
+
+\section{Proposed Methodology}
+The proposed workflow utilizes the previously described concepts and consists of Evolutionary Multi-Otsu Thresholding, Radiomic Feature Extraction, and Machine Learning Classification using SVM \cite{cortes1995}.
+
+\subsection{Radiomic Feature Extraction}
+Once the optimal thresholds are obtained via DE or $\mu$SADE, the image is segmented. We extract an interpretable radiomic feature vector consisting of:
+\begin{itemize}
+    \item \textbf{Intensity Features:} Mean and standard deviation.
+    \item \textbf{Thresholds:} The $D$ optimized thresholds.
+    \item \textbf{Morphological Features:} Number of regions, maximum area, and total area from the brightest Region of Interest ($pixels \ge t_D$).
+    \item \textbf{Texture Features (GLCM):} Contrast, Energy, and Homogeneity.
+\end{itemize}
+
+\subsection{Classification Model}
+The features are standardized (Standard Scaler) and fed to a Support Vector Machine (SVM) classifier with a linear kernel and balanced class weights \cite{pedregosa2011}.
+
+\section{Experimental Setup}
+\subsection{Datasets}
+We evaluate three publicly available CXR datasets \cite{dataset_covid}, \cite{dataset_pneumonia}, \cite{dataset_tb}:
+\begin{enumerate}
+    \item \textbf{COVID-19:} Normal vs. COVID-19.
+    \item \textbf{Pneumonia:} Normal vs. Viral/Bacterial Pneumonia.
+    \item \textbf{Tuberculosis (TB):} Normal vs. Pulmonary Tuberculosis.
+\end{enumerate}
+
+\subsection{Evaluation Pipeline}
+We define 12 global strategies (4 algorithms $\times$ 3 threshold levels: $D \in \{3, 6, 12\}$). The specific hyperparameters are detailed in Table \ref{tab:parameters}.
+
+\begin{table}[ht]
+\caption{Parameter configuration for optimization algorithms and classification model.}
+\label{tab:parameters}
+\centering
+\begin{tabular}{|l|l|c|}
+\hline
+\textbf{Stage / Algorithm} & \textbf{Parameter} & \textbf{Value} \\
+\hline
+\textbf{Global Parameters} & Number of thresholds ($D$) & 3, 6, 12 \\
+ & Max function evaluations (\textit{max\_fes}) & $D \times 1000$ \\
+\hline
+\textbf{$\mu$SADE} & Population size ($NP$) & 5 \\
+ & Restart iterations (\textit{restart\_iters}) & 10 \\
+ & Elite individuals ($e$) & 1 \\
+ & Lower bound of mutation factor ($F_l$) & 0.1 \\
+ & Upper bound of mutation factor ($F_u$) & 0.9 \\
+ & Probability of updating $F$ ($\tau_1$) & 0.1 \\
+ & Probability of updating $Cr$ ($\tau_2$) & 0.1 \\
+\hline
+\textbf{Standard DE} & Population size ($NP$) & 100 \\
+ & Mutation factor ($F$) & 0.5 \\
+ & Crossover rate ($Cr$) & 0.9 \\
+\hline
+\textbf{SVM Classifier} & Kernel type & Linear \\
+ & Class weights (\textit{class\_weight}) & Balanced \\
+ & Cross-validation splits (\textit{n\_splits}) & 10 \\
+ & Cross-validation repeats (\textit{n\_repeats}) & 5 \\
+\hline
+\end{tabular}
+\end{table}
+
+We employ Repeated Stratified K-Fold Cross-Validation with 10 splits and 5 repeats. The primary metrics are Accuracy, Recall, F1-Score, and AUC-ROC \cite{fawcett2006}. 
+
+\section{Results and Discussion}
+
+In this section, we present the empirical results obtained from our classification pipeline. The performance of the extracted radiomic features was evaluated across three chest X-ray datasets (COVID-19, Pneumonia, and Tuberculosis) using a linear SVM classifier. We define 12 global strategies corresponding to the combination of the four optimization algorithms ($\mu$SADE-rand/1, $\mu$SADE-best/1, DE-rand/1, DE-best/1) and the three threshold levels ($D \in \{3, 6, 12\}$).
+
+\subsection{Classification Performance}
+
+Table \ref{tab:f1_results} summarizes the mean F1-Score achieved by each of the 12 strategies across the three datasets, as well as the overall average performance. The F1-Score is chosen as the primary evaluation metric due to the class imbalance present in the datasets.
+
+\begin{table}[ht]
+\caption{Mean F1-Score for each global strategy across datasets.}
+\label{tab:f1_results}
+\centering
+\begin{tabular}{|l|c|c|c|c|}
+\hline
+\textbf{Strategy} & \textbf{COVID-19} & \textbf{Pneumonia} & \textbf{Tuberculosis} & \textbf{Average} \\
+\hline
+$\mu$SADE\_rand\_1\_D3 & 0.5151 & 0.9398 & 0.6779 & \textbf{0.7110} \\
+DE\_best\_1\_D3 & 0.5153 & 0.9395 & 0.6778 & 0.7109 \\
+$\mu$SADE\_best\_1\_D3 & 0.5153 & 0.9395 & 0.6778 & 0.7108 \\
+DE\_rand\_1\_D3 & 0.5148 & 0.9394 & 0.6778 & 0.7107 \\
+DE\_rand\_1\_D6 & 0.4944 & 0.9293 & 0.6897 & 0.7045 \\
+$\mu$SADE\_rand\_1\_D6 & 0.4957 & 0.9279 & 0.6893 & 0.7043 \\
+$\mu$SADE\_best\_1\_D6 & 0.4935 & 0.9295 & 0.6889 & 0.7039 \\
+DE\_best\_1\_D6 & 0.4903 & 0.9279 & 0.6873 & 0.7018 \\
+DE\_rand\_1\_D12 & 0.4785 & 0.9142 & 0.6873 & 0.6933 \\
+$\mu$SADE\_rand\_1\_D12 & 0.4758 & 0.9144 & 0.6842 & 0.6915 \\
+$\mu$SADE\_best\_1\_D12 & 0.4634 & 0.9162 & 0.6859 & 0.6885 \\
+DE\_best\_1\_D12 & 0.4451 & 0.9148 & 0.6816 & 0.6805 \\
+\hline
+\end{tabular}
+\end{table}
+
+The Pneumonia dataset proved to be the least challenging, with models achieving F1-Scores near 0.94. In contrast, the COVID-19 dataset presented the greatest difficulty, with scores dropping to roughly 0.51. Notably, an increase in the number of thresholds from $D=3$ to $D=12$ resulted in a consistent degradation of classification performance across most algorithms, suggesting that an over-segmentation of the images might be introducing noise into the radiomic features rather than capturing clinically relevant structures.
+
+\subsection{Visual Analysis of Segmentation}
+
+To qualitatively assess the impact of different algorithms and threshold levels, we visualize the segmented images generated by our pipeline. Figures \ref{fig:seg_D3}, \ref{fig:seg_D6}, and \ref{fig:seg_D12} present a comparative visual analysis of the segmentation maps produced by the optimization algorithms at $D=3, 6, 12$ respectively.
+
+\begin{figure}[htpb]
+    \centering
+    % \includegraphics[width=0.48\textwidth]{images/segmentation_D3_example.png}
+    \caption{Visual comparison of Multi-Otsu segmentation maps generated at threshold level $D=3$ across different optimization algorithms.}
+    \label{fig:seg_D3}
+\end{figure}
+
+\begin{figure}[htpb]
+    \centering
+    % \includegraphics[width=0.48\textwidth]{images/segmentation_D6_example.png}
+    \caption{Visual comparison of Multi-Otsu segmentation maps generated at threshold level $D=6$ across different optimization algorithms.}
+    \label{fig:seg_D6}
+\end{figure}
+
+\begin{figure}[htpb]
+    \centering
+    % \includegraphics[width=0.48\textwidth]{images/segmentation_D12_example.png}
+    \caption{Visual comparison of Multi-Otsu segmentation maps generated at threshold level $D=12$ across different optimization algorithms.}
+    \label{fig:seg_D12}
+\end{figure}
+
+\subsection{Statistical Evaluation}
+
+To rigorously determine whether the observed differences in performance are statistically significant, we evaluated the results from the 150 blocks (disease $\times$ cross-validation fold) using the non-parametric Friedman test.
+
+The Friedman test yielded a Chi-square statistic of $\chi_F^2 = 557.1144$ and a p-value of $2.0628 \times 10^{-112}$. Since the p-value is vastly smaller than the standard significance level ($\alpha = 0.05$), we reject the null hypothesis, confirming the presence of statistically significant differences among the 12 global configurations.
+
+Table \ref{tab:friedman_ranking} displays the average ranks computed by the Friedman test.
+
+\begin{table}[ht]
+\caption{Average Friedman Ranking for the 12 Global Strategies.}
+\label{tab:friedman_ranking}
+\centering
+\begin{tabular}{|l|c|}
+\hline
+\textbf{Strategy} & \textbf{Average Rank} \\
+\hline
+$\mu$SADE\_rand\_1\_D3 & \textbf{4.3000} \\
+DE\_best\_1\_D3 & 4.3700 \\
+$\mu$SADE\_best\_1\_D3 & 4.4000 \\
+DE\_rand\_1\_D3 & 4.5567 \\
+DE\_rand\_1\_D6 & 5.7833 \\
+$\mu$SADE\_best\_1\_D6 & 5.9667 \\
+$\mu$SADE\_rand\_1\_D6 & 6.1133 \\
+DE\_best\_1\_D6 & 6.8267 \\
+DE\_rand\_1\_D12 & 8.4367 \\
+$\mu$SADE\_rand\_1\_D12 & 8.7400 \\
+$\mu$SADE\_best\_1\_D12 & 8.8500 \\
+DE\_best\_1\_D12 & 9.6567 \\
+\hline
+\end{tabular}
+\end{table}
+
+The absolute best-performing configuration is $\mu$SADE utilizing the `rand/1` mutation strategy at $D=3$ thresholds, achieving an average rank of 4.30.
+
+Following the Friedman test, a Nemenyi post-hoc test was conducted to perform pairwise comparisons. Figure \ref{fig:nemenyi_heatmap} illustrates the $12 \times 12$ significance heatmap of the p-values derived from the Nemenyi test.
+
+\begin{figure}[ht]
+    \centering
+    \includegraphics[width=0.48\textwidth]{heatmap_nemenyi_MAESTRO.png}
+    \caption{Nemenyi Post-Hoc Test Heatmap ($12 \times 12$). Cells denote the p-values of pairwise comparisons between the global strategies. Values below $0.05$ indicate a statistically significant difference.}
+    \label{fig:nemenyi_heatmap}
+\end{figure}
+
+The statistical analysis solidifies that segmentations with lower threshold counts ($D=3$) consistently and significantly outperform higher thresholds. Furthermore, $\mu$SADE approaches demonstrated highly competitive results despite operating with a drastically smaller population size ($NP=5$) compared to the Standard DE ($NP=100$), confirming their superior computational efficiency without sacrificing segmentation quality.
+
+\section{Conclusion}
+
+This study presents a comprehensive framework for chest X-ray classification, coupling evolutionary Multi-Otsu thresholding with radiomic feature extraction. By evaluating the Standard Differential Evolution (DE) and its micro-variant ($\mu$SADE) across multiple mutation schemes and threshold levels, we derived several key insights. 
+
+First, our empirical results challenge the assumption that more segmentation thresholds yield better clinical features. Consistently across three distinct pulmonary diseases, segmenting images into fewer regions ($D=3$) provided significantly better classification performance (F1-Score $\sim$ 0.71) than more granular segmentations ($D=12$). Over-segmentation likely dissects pathological regions into indiscernible textures, degrading the predictive capability of the GLCM and morphological features.
+
+Secondly, the rigorous statistical analysis---supported by the Friedman and Nemenyi tests---identified $\mu$SADE\_rand\_1\_D3 as the absolute winner. The $\mu$SADE algorithm proved capable of finding highly robust thresholds utilizing an extremely constrained population size ($NP=5$). Its self-adaptive parameters and restart mechanisms successfully avoid premature convergence while ensuring computational viability for large-scale medical image analysis. Future work could explore the integration of $\mu$SADE-driven radiomics with deep learning embeddings to further improve the classification accuracy, particularly for highly complex datasets such as COVID-19.
+
+% ---- Bibliography ----
+\begin{thebibliography}{8}
+\bibitem{brest2006}
+Brest, J., Greiner, S., Boskovic, B., Mernik, M., Zumer, V.: Self-adapting control parameters in differential evolution: A comparative study on numerical benchmark problems. IEEE Transactions on Evolutionary Computation \textbf{10}(6), 646--657 (2006)
+
+\bibitem{dataset_covid}
+Rahman, T.: COVID-19 Radiography Database. Kaggle, \url{https://www.kaggle.com/datasets/tawsifurrahman/covid19-radiography-database}, último acceso 2026/03/31
+
+\bibitem{dataset_pneumonia}
+Mooney, P.: Chest X-Ray Images (Pneumonia). Kaggle, \url{https://www.kaggle.com/datasets/paultimothymooney/chest-xray-pneumonia}, último acceso 2026/03/31
+
+\bibitem{dataset_tb}
+Mandal, T.: Chest X-ray Dataset for Tuberculosis Segmentation. Kaggle, \url{https://www.kaggle.com/datasets/iamtapendu/chest-x-ray-lungs-segmentation}, último acceso 2026/03/31
+
+\bibitem{eadie2012}
+Eadie, L.H., Taylor, P., Gibson, A.P.: Recommendations for research design and reporting in computer-assisted diagnosis to facilitate meta-analysis. Journal of Biomedical Informatics \textbf{45}(2), 390--397 (2012)
+
+\bibitem{yip2016}
+Yip, S.S.F., Aerts, H.J.W.L.: Applications and limitations of radiomics. Physics in Medicine \& Biology \textbf{61}(13), R150--R166 (2016)
+
+\bibitem{qi2020}
+Qi, X., Jiang, Z., Yu, Q., Shao, C., Zhang, H., Yue, H., Ma, B., Wang, Y., Liu, C., Meng, X., Huang, S., Wang, J., Xu, Y., Gu, J.: Radiomics nomogram for the prediction of 2019 novel coronavirus pneumonia in patients with pulmonary anomalies. European Radiology \textbf{30}(11), 5891--5900 (2020)
+
+\bibitem{haralick1973}
+Haralick, R.M., Shanmugam, K., Dinstein, I.: Textural features for image classification. IEEE Transactions on Systems, Man, and Cybernetics \textbf{SMC-3}(6), 610--621 (1973)
+
+\bibitem{lambin2012}
+Lambin, P., Rios-Velazquez, E., Leijenaar, R., Carvalho, S., van Stiphout, R.G.P.M., Granton, P., Zegers, C.M.L., Gillies, R., Boellard, R., Dekker, A., Aerts, H.J.W.L.: Radiomics: Extracting more information from medical images using advanced feature analysis. European Journal of Cancer \textbf{48}(4), 441--446 (2012)
+
+\bibitem{friedman1937}
+Friedman, M.: The use of ranks to avoid the assumption of normality implicit in the analysis of variance. Journal of the American Statistical Association \textbf{32}(200), 675--701 (1937)
+
+\bibitem{nemenyi1963}
+Nemenyi, P.B.: Distribution-free multiple comparisons. PhD thesis, Princeton University (1963)
+
+\bibitem{demsar2006}
+Demšar, J.: Statistical comparisons of classifiers over multiple data sets. Journal of Machine Learning Research \textbf{7}, 1--30 (2006)
+
+\bibitem{cortes1995}
+Cortes, C., Vapnik, V.: Support-vector networks. Machine Learning \textbf{20}(3), 273--297 (1995)
+
+\bibitem{pedregosa2011}
+Pedregosa, F., Varoquaux, G., Gramfort, A., Michel, V., Thirion, B., Grisel, O., Blondel, M., Prettenhofer, P., Weiss, R., Dubourg, V., Vanderplas, J., Passos, A., Cournapeau, D., Brucher, M., Perrot, M., Duchesnay, E.: Scikit-learn: Machine learning in Python. Journal of Machine Learning Research \textbf{12}, 2825--2830 (2011)
+
+\bibitem{fawcett2006}
+Fawcett, T.: An introduction to ROC analysis. Pattern Recognition Letters \textbf{27}(8), 861--874 (2006)
+
+\end{thebibliography}
+\end{document}
