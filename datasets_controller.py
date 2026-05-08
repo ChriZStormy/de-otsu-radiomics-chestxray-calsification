@@ -1,106 +1,179 @@
 import os
 import cv2
+import time
 import numpy as np
 import pandas as pd
+import matplotlib
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from pathlib import Path
 from skimage.feature import graycomatrix, graycoprops
 from skimage.measure import label, regionprops
 from skimage.filters import threshold_multiotsu
+from joblib import Parallel, delayed
 import warnings
 
 warnings.filterwarnings("ignore")
 
-class MicroDE_MultiOtsu:
-    def __init__(self, NP=8, G_max=50, strategy='DE/rand/1'):
+def calculate_fitness(thresholds, hist, total_pixels):
+    """Calcula la varianza negativa (para minimizar) de Multi-Otsu D=3 (4 regiones)."""
+    t = np.clip(np.sort(np.round(thresholds).astype(int)), 0, 255)
+    
+    w = np.zeros(4)
+    mu = np.zeros(4)
+    bins = np.arange(256)
+    
+    w[0] = np.sum(hist[:t[0]]) / total_pixels
+    if w[0] > 0: mu[0] = np.sum(bins[:t[0]] * hist[:t[0]]) / (w[0] * total_pixels)
+    
+    w[1] = np.sum(hist[t[0]:t[1]]) / total_pixels
+    if w[1] > 0: mu[1] = np.sum(bins[t[0]:t[1]] * hist[t[0]:t[1]]) / (w[1] * total_pixels)
+    
+    w[2] = np.sum(hist[t[1]:t[2]]) / total_pixels
+    if w[2] > 0: mu[2] = np.sum(bins[t[1]:t[2]] * hist[t[1]:t[2]]) / (w[2] * total_pixels)
+    
+    w[3] = np.sum(hist[t[2]:]) / total_pixels
+    if w[3] > 0: mu[3] = np.sum(bins[t[2]:] * hist[t[2]:]) / (w[3] * total_pixels)
+    
+    mu_t = np.sum(w * mu)
+    sigma_b_sq = np.sum(w * ((mu - mu_t) ** 2))
+    
+    return -sigma_b_sq
+
+class uSADE_MultiOtsu:
+    def __init__(self, NP=10, max_fes=3000, strategy='DE/best/1', restart_iters=10):
         self.NP = NP
-        self.G_max = G_max
+        self.max_fes = max_fes
         self.strategy = strategy
-        self.D = 3  # P0, P1, P2
-        
-    def fitness_evaluation(self, thresholds, hist, total_pixels):
-        """Calcula la varianza negativa (para minimizar) de Multi-Otsu."""
-        t = np.clip(np.sort(np.round(thresholds).astype(int)), 0, 255)
-        
-        w = np.zeros(4)
-        mu = np.zeros(4)
-        bins = np.arange(256)
-        
-        w[0] = np.sum(hist[:t[0]]) / total_pixels
-        if w[0] > 0: mu[0] = np.sum(bins[:t[0]] * hist[:t[0]]) / (w[0] * total_pixels)
-        
-        w[1] = np.sum(hist[t[0]:t[1]]) / total_pixels
-        if w[1] > 0: mu[1] = np.sum(bins[t[0]:t[1]] * hist[t[0]:t[1]]) / (w[1] * total_pixels)
-        
-        w[2] = np.sum(hist[t[1]:t[2]]) / total_pixels
-        if w[2] > 0: mu[2] = np.sum(bins[t[1]:t[2]] * hist[t[1]:t[2]]) / (w[2] * total_pixels)
-        
-        w[3] = np.sum(hist[t[2]:]) / total_pixels
-        if w[3] > 0: mu[3] = np.sum(bins[t[2]:] * hist[t[2]:]) / (w[3] * total_pixels)
-        
-        mu_t = np.sum(w * mu)
-        sigma_b_sq = np.sum(w * ((mu - mu_t) ** 2))
-        
-        return -sigma_b_sq
+        self.restart_iters = restart_iters
+        self.D = 3
+        self.e = 1 # Elitismo
 
     def optimize(self, image):
         hist = cv2.calcHist([image], [0], None, [256], [0, 256]).flatten()
         total_pixels = image.size
         
-        pop = np.random.uniform(0, 255, (self.NP, self.D))
-        pop = np.sort(pop, axis=1)
-        F = np.random.uniform(0.1, 1.0, self.NP)
-        CR = np.random.uniform(0.1, 1.0, self.NP)
+        pop = np.sort(np.random.uniform(0, 255, (self.NP, self.D)), axis=1)
+        fitness = np.array([calculate_fitness(ind, hist, total_pixels) for ind in pop])
         
-        fitness = np.array([self.fitness_evaluation(ind, hist, total_pixels) for ind in pop])
-        historial_convergencia = []
+        F = np.random.uniform(0.1, 0.9, self.NP)
+        CR = np.random.rand(self.NP)
         
-        for g in range(self.G_max):
+        fes = self.NP
+        t = 1
+        
+        convergence = []
+        
+        while fes < self.max_fes:
+            if t % self.restart_iters == 0:
+                sort_idx = np.argsort(fitness)
+                pop, fitness = pop[sort_idx], fitness[sort_idx]
+                F, CR = F[sort_idx], CR[sort_idx]
+                
+                # Elitismo: mantenemos los self.e mejores
+                for i in range(self.e, self.NP):
+                    if fes >= self.max_fes: break
+                    pop[i] = np.sort(np.random.uniform(0, 255, self.D))
+                    fitness[i] = calculate_fitness(pop[i], hist, total_pixels)
+                    fes += 1
+                    F[i] = np.random.uniform(0.1, 0.9)
+                    CR[i] = np.random.rand()
+            
             best_idx = np.argmin(fitness)
-            historial_convergencia.append(fitness[best_idx])
+            convergence.append(fitness[best_idx])
             
             for i in range(self.NP):
-                F_i = F[i] if np.random.rand() > 0.1 else np.random.uniform(0.1, 1.0)
-                CR_i = CR[i] if np.random.rand() > 0.1 else np.random.uniform(0.1, 1.0)
+                if fes >= self.max_fes: break
+                
+                # Self-adaptation
+                if np.random.rand() < 0.1: F[i] = np.random.uniform(0.1, 0.9)
+                if np.random.rand() < 0.1: CR[i] = np.random.rand()
                 
                 idxs = [idx for idx in range(self.NP) if idx != i]
                 np.random.shuffle(idxs)
-                r1, r2, r3, r4, r5 = idxs[:5]
+                r1, r2, r3 = idxs[:3]
                 
                 if self.strategy == 'DE/rand/1':
-                    V = pop[r1] + F_i * (pop[r2] - pop[r3])
+                    V = pop[r1] + F[i] * (pop[r2] - pop[r3])
                 elif self.strategy == 'DE/best/1':
-                    V = pop[best_idx] + F_i * (pop[r1] - pop[r2])
-                elif self.strategy == 'DE/rand/2':
-                    V = pop[r1] + F_i * (pop[r2] - pop[r3] + pop[r4] - pop[r5])
-                elif self.strategy == 'DE/best/2':
-                    V = pop[best_idx] + F_i * (pop[r1] - pop[r2] + pop[r3] - pop[r4])
+                    V = pop[best_idx] + F[i] * (pop[r1] - pop[r2])
                 
-                V = np.clip(V, 0, 255)
-                V = np.sort(V)
+                V = np.sort(np.clip(V, 0, 255))
                 
                 j_rand = np.random.randint(self.D)
-                mask = (np.random.rand(self.D) <= CR_i) | (np.arange(self.D) == j_rand)
+                mask = (np.random.rand(self.D) <= CR[i]) | (np.arange(self.D) == j_rand)
                 U = np.where(mask, V, pop[i])
+                U = np.sort(U)
                 
-                f_U = self.fitness_evaluation(U, hist, total_pixels)
+                f_U = calculate_fitness(U, hist, total_pixels)
+                fes += 1
+                
                 if f_U <= fitness[i]:
-                    pop[i] = U
-                    fitness[i] = f_U
-                    F[i] = F_i
-                    CR[i] = CR_i
+                    pop[i], fitness[i] = U, f_U
+                    
+            t += 1
+            
+        best_idx = np.argmin(fitness)
+        return np.round(pop[best_idx]).astype(int), convergence
+
+class StandardDE_MultiOtsu:
+    def __init__(self, NP=15, max_fes=3000, strategy='DE/rand/1'):
+        self.NP = NP
+        self.max_fes = max_fes
+        self.strategy = strategy
+        self.D = 3
+        self.F = 0.5
+        self.CR = 0.9
+
+    def optimize(self, image):
+        hist = cv2.calcHist([image], [0], None, [256], [0, 256]).flatten()
+        total_pixels = image.size
+        
+        pop = np.sort(np.random.uniform(0, 255, (self.NP, self.D)), axis=1)
+        fitness = np.array([calculate_fitness(ind, hist, total_pixels) for ind in pop])
+        
+        fes = self.NP
+        convergence = []
+        
+        while fes < self.max_fes:
+            best_idx = np.argmin(fitness)
+            convergence.append(fitness[best_idx])
+            
+            for i in range(self.NP):
+                if fes >= self.max_fes: break
+                
+                idxs = [idx for idx in range(self.NP) if idx != i]
+                np.random.shuffle(idxs)
+                r1, r2, r3 = idxs[:3]
+                
+                if self.strategy == 'DE/rand/1':
+                    V = pop[r1] + self.F * (pop[r2] - pop[r3])
+                elif self.strategy == 'DE/best/1':
+                    V = pop[best_idx] + self.F * (pop[r1] - pop[r2])
+                
+                V = np.sort(np.clip(V, 0, 255))
+                
+                j_rand = np.random.randint(self.D)
+                mask = (np.random.rand(self.D) <= self.CR) | (np.arange(self.D) == j_rand)
+                U = np.where(mask, V, pop[i])
+                U = np.sort(U)
+                
+                f_U = calculate_fitness(U, hist, total_pixels)
+                fes += 1
+                
+                if f_U <= fitness[i]:
+                    pop[i], fitness[i] = U, f_U
                     
         best_idx = np.argmin(fitness)
-        historial_convergencia.append(fitness[best_idx])
-        
-        return np.round(pop[best_idx]).astype(int), historial_convergencia
+        return np.round(pop[best_idx]).astype(int), convergence
 
 def extract_radiomics(image, thresholds):
     P0, P1, P2 = thresholds
     mu_2 = np.mean(image)
     sigma_2 = np.std(image)
     
-    binary_mask = (image >= P2).astype(int)
+    # Análisis Morfológico (en ROI >= P2 que suele ser consolidación/hueso)
+    binary_mask = (image >= P2).astype(np.uint8)
     labeled_mask = label(binary_mask)
     regions = regionprops(labeled_mask)
     
@@ -109,6 +182,7 @@ def extract_radiomics(image, thresholds):
     area_max = max(areas) if areas else 0
     area_total = sum(areas)
     
+    # Análisis Textura GLCM
     glcm = graycomatrix(image, distances=[1], angles=[0], levels=256, symmetric=True, normed=True)
     glcm_contraste = graycoprops(glcm, 'contrast')[0, 0]
     glcm_energia = graycoprops(glcm, 'energy')[0, 0]
@@ -116,130 +190,145 @@ def extract_radiomics(image, thresholds):
     
     return [P0, P1, P2, mu_2, sigma_2, num_regiones, area_max, area_total, glcm_contraste, glcm_energia, glcm_homogeneidad]
 
-def guardar_visualizacion(img, umbrales, estrategia, clase_img, history, out_dir):
-    """Genera y guarda la composición visual de la segmentación."""
-    img_segmented = np.zeros_like(img)
-    img_segmented[img < umbrales[0]] = 0
-    img_segmented[(img >= umbrales[0]) & (img < umbrales[1])] = 85
-    img_segmented[(img >= umbrales[1]) & (img < umbrales[2])] = 170
-    img_segmented[img >= umbrales[2]] = 255
-    
-    binary_mask = (img >= umbrales[2]).astype(np.uint8) * 255
-    
-    n_plots = 4 if history else 3
-    fig, axes = plt.subplots(1, n_plots, figsize=(15 if history else 12, 4))
-    
-    axes[0].imshow(img, cmap='gray')
-    axes[0].set_title(f'Original ({clase_img})')
-    axes[0].axis('off')
-    
-    axes[1].imshow(img_segmented, cmap='gray')
-    axes[1].set_title(f'Multi-Otsu 4 Clases\nUmbrales: {list(umbrales)}')
-    axes[1].axis('off')
-    
-    axes[2].imshow(binary_mask, cmap='gray')
-    axes[2].set_title('ROI Radiomics (>= P2)')
-    axes[2].axis('off')
-    
-    if history:
-        axes[3].plot(history, color='blue', linewidth=2)
-        axes[3].set_title('Convergencia μDE')
-        axes[3].set_xlabel('Generación')
-        axes[3].set_ylabel('Fitness (-Varianza)')
-        axes[3].grid(True, linestyle='--', alpha=0.7)
-        
-    plt.tight_layout()
-    safe_name = estrategia.replace('/', '_')
-    plt.savefig(os.path.join(out_dir, f"{safe_name}_{clase_img}.png"), dpi=150)
-    plt.close()
+# --- RUTAS DE DATASETS ---
+def get_covid_paths(base):
+    paths = []
+    p = Path(base) / "Chest-X-Ray-COVID19"
+    for folder, label_val in [("Normal", 0), ("COVID", 1)]:
+        target_dir = p / folder / "images"
+        if target_dir.exists():
+            for img in target_dir.glob("*"):
+                if img.suffix.lower() in ['.png', '.jpg', '.jpeg'] and "mask" not in str(img).lower():
+                    paths.append((img, label_val))
+    return paths
 
-def run_pipeline(dataset_path):
-    estrategias = ['Standard_Otsu', 'DE/rand/1', 'DE/best/1', 'DE/rand/2', 'DE/best/2']
-    base_dir = Path(dataset_path)
+def get_neumonia_paths(base):
+    paths = []
+    p = Path(base) / "Chest-X-Ray-Neumonia"
+    for img in p.rglob("*"):
+        if img.suffix.lower() in ['.jpeg', '.jpg', '.png'] and "mask" not in str(img).lower():
+            if img.is_file():
+                if "NORMAL" in str(img).upper(): paths.append((img, 0))
+                elif "PNEUMONIA" in str(img).upper(): paths.append((img, 1))
+    return paths
+
+def get_tb_paths(base):
+    paths = []
+    p = Path(base) / "Chest-X-Ray-Tuberculosis"
+    csv_path = p / "MetaData.csv"
+    if not csv_path.exists(): return []
+
+    df = pd.read_csv(csv_path)
+    for _, row in df.iterrows():
+        img_id = str(row['id'])
+        label_val = int(row['ptb']) 
+        img_name = f"{img_id}.png" 
+        img_path = p / "Chest-X-Ray" / "image" / img_name
+        if not img_path.exists():
+            img_path = p / "images" / img_name
+        if img_path.exists() and "mask" not in str(img_path).lower():
+            paths.append((img_path, label_val))
+    return paths
+
+# --- PROCESAMIENTO PARALELO ---
+def procesar_combinacion(dataset_name, image_list, estrategia, max_fes):
+    safe_name = estrategia.replace('/', '_')
+    output_csv = f"results/Radiomics_{dataset_name}_{safe_name}.csv"
     
-    dir_resultados = "resultados_segmentacion_umbralizada"
-    os.makedirs(dir_resultados, exist_ok=True)
+    if os.path.exists(output_csv):
+        print(f" -> [OMITIENDO] {output_csv} ya existe.")
+        # Retornamos None si se omitió
+        return None
+        
+    print(f" -> [INICIANDO] {dataset_name} | {estrategia}")
+    start_time = time.time()
     
-    all_images = list(base_dir.rglob("*.jpeg"))
+    if estrategia.startswith('uSADE'):
+        opt_strat = 'DE/best/1' if 'best' in estrategia else 'DE/rand/1'
+        optimizer = uSADE_MultiOtsu(NP=10, max_fes=max_fes, strategy=opt_strat)
+    elif estrategia.startswith('DE'):
+        opt_strat = 'DE/best/1' if 'best' in estrategia else 'DE/rand/1'
+        optimizer = StandardDE_MultiOtsu(NP=15, max_fes=max_fes, strategy=opt_strat)
     
-    # Instanciar clase estática para evaluar fitness del Standard_Otsu
-    evaluador_estatico = MicroDE_MultiOtsu()
+    dataset_rows = []
+    image_times = []
     
-    for estrategia in estrategias:
-        print(f"\n{'-'*60}")
-        print(f"[INFO] Procesando con esquema: {estrategia}")
-        print(f"{'-'*60}")
+    for img_path, label_val in image_list:
+        img = cv2.imread(str(img_path), cv2.IMREAD_GRAYSCALE)
+        if img is None: continue
         
-        safe_name = estrategia.replace('/', '_')
-        output_csv = f"radiomics_{safe_name}.csv"
+        hist = cv2.calcHist([img], [0], None, [256], [0, 256]).flatten()
+        total_pixels = img.size
         
-        # Banderas para extracción de imágenes de ejemplo
-        ejemplo_normal_guardado = False
-        ejemplo_neumonia_guardado = False
-        
-        # Variables de seguimiento global
-        mejor_fitness_global = float('inf')
-        mejor_individuo_global = None
-        
-        if os.path.exists(output_csv):
-            print(f"[INFO] El archivo '{output_csv}' ya existe. Elimínelo si desea regenerar las imágenes.")
-            continue
-            
-        if estrategia != 'Standard_Otsu':
-            optimizer = MicroDE_MultiOtsu(NP=8, G_max=30, strategy=estrategia)
-            
-        dataset_rows = []
-        
-        for idx, img_path in enumerate(all_images):
-            label_name = img_path.parent.name.upper()
-            y_label = 1 if label_name == "PNEUMONIA" else 0
-            
-            img = cv2.imread(str(img_path), cv2.IMREAD_GRAYSCALE)
-            if img is None:
-                continue
-                
-            hist = cv2.calcHist([img], [0], None, [256], [0, 256]).flatten()
-            total_pixels = img.size
-            
-            # 1. Optimización
-            historial = None
-            if estrategia == 'Standard_Otsu':
+        if estrategia == 'Standard_Otsu':
+            try:
+                start_img = time.time()
                 best_thresholds = threshold_multiotsu(img, classes=4)
-            else:
-                best_thresholds, historial = optimizer.optimize(img)
+                end_img = time.time()
+                image_times.append(end_img - start_img)
+            except:
+                continue
+        else:
+            start_img = time.time()
+            best_thresholds, _ = optimizer.optimize(img)
+            end_img = time.time()
+            image_times.append(end_img - start_img)
             
-            # 2. Evaluación de Fitness para registro global
-            fitness_actual = evaluador_estatico.fitness_evaluation(best_thresholds, hist, total_pixels)
-            if fitness_actual < mejor_fitness_global:
-                mejor_fitness_global = fitness_actual
-                mejor_individuo_global = best_thresholds
-                
-            # 3. Guardado de visualizaciones (Solo el primer caso de cada clase)
-            if label_name == "NORMAL" and not ejemplo_normal_guardado:
-                guardar_visualizacion(img, best_thresholds, estrategia, "NORMAL", historial, dir_resultados)
-                ejemplo_normal_guardado = True
-                
-            elif label_name == "PNEUMONIA" and not ejemplo_neumonia_guardado:
-                guardar_visualizacion(img, best_thresholds, estrategia, "PNEUMONIA", historial, dir_resultados)
-                ejemplo_neumonia_guardado = True
-            
-            # 4. Extracción de características
-            features = extract_radiomics(img, best_thresholds)
-            row = features + [y_label]
-            dataset_rows.append(row)
-            
-            if (idx + 1) % 100 == 0:
-                print(f"  -> Procesadas {idx + 1}/{len(all_images)} imágenes...")
-                
-        # Guardar CSV
-        columns = ['P_0', 'P_1', 'P_2', 'mu_2', 'sigma_2', 'num_regiones', 'area_max', 'area_total', 'GLCM_contraste', 'GLCM_energia', 'GLCM_homogeneidad', 'clase']
+        features = extract_radiomics(img, best_thresholds)
+        row = features + [label_val]
+        dataset_rows.append(row)
+        
+    if dataset_rows:
+        columns = ['P_0', 'P_1', 'P_2', 'mu_2', 'sigma_2', 'num_regiones', 'area_max', 'area_total', 'GLCM_contraste', 'GLCM_energia', 'GLCM_homogeneidad', 'label']
         df = pd.DataFrame(dataset_rows, columns=columns)
         df.to_csv(output_csv, index=False)
         
-        print(f"[COMPLETADO] Dataset guardado: {output_csv}")
-        print(f"[GLOBAL BEST] Mejor Fitness (-Varianza): {mejor_fitness_global:.4f}")
-        print(f"[GLOBAL BEST] Umbrales del mejor individuo: {mejor_individuo_global}")
+    elapsed = time.time() - start_time
+    
+    mean_time = np.mean(image_times) if image_times else 0
+    std_time = np.std(image_times) if image_times else 0
+    
+    print(f" <- [FINALIZADO] {dataset_name} - {estrategia} | Tiempo: {elapsed/60:.2f} mins | Promedio/img: {mean_time:.4f}s (±{std_time:.4f})")
+    
+    return {
+        'Dataset': dataset_name,
+        'Estrategia': estrategia,
+        'Tiempo_Promedio_Segundos': mean_time,
+        'Desviacion_Estandar_Segundos': std_time
+    }
+
+def run_pipeline(base_path):
+    os.makedirs('results', exist_ok=True)
+    
+    problemas = {
+        "COVID19": get_covid_paths(base_path),
+        "Neumonia": get_neumonia_paths(base_path),
+        "Tuberculosis": get_tb_paths(base_path)
+    }
+    
+    estrategias = ['Standard_Otsu', 'DE_rand_1', 'DE_best_1', 'uSADE_rand_1', 'uSADE_best_1']
+    max_fes = 3000 # Para D=3
+    
+    tareas = []
+    for dataset_name, image_list in problemas.items():
+        if not image_list:
+            print(f"![AVISO] No se encontraron imágenes para {dataset_name}")
+            continue
+        for est in estrategias:
+            tareas.append((dataset_name, image_list, est, max_fes))
+            
+    print(f"=== INICIANDO EXTRACCIÓN PARALELA ({len(tareas)} tareas) ===")
+    timing_results = Parallel(n_jobs=-1)(
+        delayed(procesar_combinacion)(d_name, i_list, est, fes) for d_name, i_list, est, fes in tareas
+    )
+    
+    timing_results = [t for t in timing_results if t is not None]
+    if timing_results:
+        df_times = pd.DataFrame(timing_results)
+        df_times.to_csv("results/metrics/Tiempos_Promedio_Por_Imagen.csv", index=False)
+        print("\n[OK] Tiempos guardados en results/metrics/Tiempos_Promedio_Por_Imagen.csv")
+        
+    print("=== PIPELINE COMPLETADO ===")
 
 if __name__ == "__main__":
-    ruta_dataset = 'dataset/chest_xray'
-    run_pipeline(ruta_dataset)
+    run_pipeline('dataset')

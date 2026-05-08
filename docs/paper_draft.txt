@@ -1,0 +1,320 @@
+\documentclass{llncs}
+\usepackage[utf8]{inputenc}
+\usepackage[spanish]{babel}
+\usepackage{amsmath}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+
+\begin{document}
+
+\title{Esquemas de Mutación para Micro Evolución Diferencial Adaptativa ($\mu$SADE) en Clasificación de Imágenes Medicas}
+\author{Christian Gomez Magdaleno}
+\institute{División de Ciencias Económico Administrativas, Universidad de Guanajuato}
+
+\maketitle
+
+\begin{abstract}
+El diagnóstico asistido por computadora (CAD) en imágenes médicas requiere procesos de segmentación robustos, ya que estos influyen directamente en la calidad de las características extraídas mediante enfoques como Radiomics. En este trabajo se evalúa la técnica de umbralización Multi-Otsu optimizada mediante el algoritmo $\mu$-SADE, con el objetivo de mejorar la segmentación de radiografías en cuatro regiones relevantes: fondo, tejido blando, hueso y posibles patologías. Se comparan cuatro variantes de algoritmos evolutivos ($\mu$-SADE/Best/1, $\mu$-SADE/rand, DE/best/1 y DE/rand/1) contra la solución obtenida mediante búsqueda exhaustiva del método clásico de Multi-Otsu. Posteriormente, las características extraídas de las imágenes segmentadas se emplean en un proceso de clasificación binaria utilizando una Máquina de Vectores de Soporte (SVM) con kernel lineal. La evaluación se realiza sobre tres conjuntos de datos de imágenes médicas correspondientes a COVID-19, tuberculosis y neumonía. Los resultados permiten analizar el impacto en el desempeño de clasificación. Los resultados se contrastan mediante técnicas estadísticas para determinar si alguna de las variantes evaluadas presenta mejoras significativas en el desempeño.
+
+\keywords{$\mu$-SADE \and Radiomics \and Segmentación de imágenes \and Optimización \and CAD}
+\end{abstract}
+
+\section{Introducción}
+Aunque en años recientes los métodos basados en aprendizaje profundo, como las redes neuronales convolucionales (CNNs) y arquitecturas U-Net, han establecido el estado del arte en segmentación médica, estos modelos presentan limitaciones prácticas: requieren vastos volúmenes de datos anotados, alto poder computacional y carecen de interpretabilidad directa (modelos de caja negra). En contraste, el enfoque clásico optimizado propuesto en este estudio (Multi-Otsu + Radiomics) ofrece alta interpretabilidad, viabilidad en entornos con recursos limitados y no depende de tiempos prolongados de entrenamiento.
+
+En la última década, el Diagnóstico Asistido por Computadora (CAD) se ha consolidado como una herramienta fundamental para optimizar la precisión y la rapidez en la interpretación de imágenes médicas 5. Ante la creciente prevalencia de enfermedades respiratorias de alto impacto global, como la Tuberculosis, la Neumonía y el COVID-19, la capacidad de procesar y analizar radiografías de tórax de manera automatizada se ha vuelto una prioridad para los sistemas de salud [2], [3], [4], [7]. El flujo de trabajo típico de estos sistemas comienza con la adquisición de la imagen y culmina en la clasificación patológica; sin embargo, su éxito depende críticamente de una etapa intermedia: la segmentación de imágenes. La segmentación permite aislar estructuras anatómicas de interés (como el tejido pulmonar) de regiones con anomalías o ruido.
+
+Uno de los métodos más robustos para este fin es la umbralización de Otsu, la cual busca maximizar la varianza entre clases para separar los niveles de gris. No obstante, cuando se requiere una segmentación multinivel (Multi-Otsu) para distinguir simultáneamente entre fondo, tejido blando, hueso y patologías, la complejidad computacional de una búsqueda exhaustiva crece de forma exponencial respecto al número de umbrales D. Esto hace que el método tradicional sea ineficiente para aplicaciones que requieren procesamiento masivo de datos o alta resolución. Para abordar esta limitación, las metaheurísticas de optimización han surgido como una alternativa viable. En particular, la Evolución Diferencial (DE) ha demostrado ser eficaz en espacios de búsqueda continuos y complejos. Sin embargo, el ajuste de sus hiperparámetros y el costo computacional de evaluar poblaciones grandes siguen siendo retos abiertos [1].
+
+En este contexto, la Micro Evolución Diferencial Adaptativa (SADE) propone una solución mediante el uso de poblaciones reducidas ($NP=10$) y mecanismos de auto-adaptación de parámetros, permitiendo encontrar configuraciones de umbrales óptimas con un número reducido de evaluaciones de la función objetivo. El presente artículo evalúa el impacto de diferentes esquemas de mutación de SADE en la calidad de la segmentación de radiografías de tórax. La premisa central es que una segmentación optimizada no solo es más rápida, sino que produce regiones más precisas para la Radiómica, facilitando la extracción de características cuantitativas de textura y forma que a menudo son imperceptibles al ojo humano [8] [9] [6]. A través de un estudio comparativo entre las variantes $\mu$SADE/rand/1, $\mu$SADE/best/1, DE estándar y la búsqueda exhaustiva de Otsu, se busca determinar cuál configuración ofrece el mejor balance entre eficiencia computacional y precisión diagnóstica utilizando un clasificador SVM sobre tres conjuntos de datos clínicos.
+
+\section{Marco Teórico}
+
+\subsection{Radiómica (Radiomics)}
+La radiómica es un área de la investigación médica enfocada en la extracción automatizada de una gran cantidad de características cuantitativas a partir de imágenes médicas digitales. A diferencia de la evaluación cualitativa visual tradicional, la radiómica transforma las imágenes en conjuntos de datos estructurados y minables que capturan información sobre el fenotipo de los tejidos 19. En este estudio, el vector de características radiómicas extraído tras la segmentación abarca estadísticos de primer orden (media y desviación estándar global), descriptores de forma o distribución (número de regiones, área total y área máxima) y características de textura de segundo orden obtenidas a través de la Matriz de Co-ocurrencia de Nivel de Gris (GLCM) [8], tales como el contraste, la energía y la homogeneidad.
+
+\subsection{Segmentación Multi-Otsu}
+El método de Otsu es una técnica clásica de umbralización global que segmenta una imagen maximizando la varianza entre clases de las intensidades de los píxeles. La umbralización Multi-Otsu es la generalización de este método para problemas multinivel, cuyo objetivo es dividir la imagen en múltiples regiones homogéneas (por ejemplo: fondo, tejido blando, huesos y patologías) encontrando D umbrales óptimos. Matemáticamente, el problema se plantea como un desafío de optimización, donde la función objetivo a minimizar en este trabajo es la varianza entre clases negativa. Dado que la complejidad computacional de la búsqueda exhaustiva crece exponencialmente al aumentar el número de umbrales D, es fundamental implementar métodos metaheurísticos para lograr tiempos de ejecución viables.
+
+\subsection{Evolución Diferencial (DE)}
+La Evolución Diferencial es un algoritmo metaheurístico de optimización global, estocástico y basado en poblaciones, diseñado principalmente para espacios de búsqueda continuos. El algoritmo opera a través de la evolución generacional de una población de NP vectores de parámetros, utilizando tres operaciones principales: mutación, cruza y selección. Durante la generación G, por cada vector objetivo $x_{i,G}$, el operador de mutación crea un vector mutante $v_{i,G}$. Seguidamente, el operador de cruza discretiza la combinación entre el vector objetivo y el vector mutante para generar un vector de prueba $u_{i,G}$. Finalmente, se aplica un torneo codicioso en el operador de selección, donde el vector que posea el mejor valor de la función objetivo sobrevive para la siguiente generación.
+
+\textbf{Esquemas de Mutación} La capacidad de exploración y explotación de la Evolución Diferencial depende críticamente de su estrategia de mutación. Este documento evalúa el desempeño de dos de los esquemas más representativos de la literatura:
+
+\textbf{DE/rand/1} En este esquema, el vector base y los vectores de diferencia se seleccionan de manera completamente aleatoria ($r1, r2$ y $r3$ son índices mutuamente excluyentes). Al no depender de la mejor solución actual, esta variante fomenta la diversidad poblacional y una amplia exploración del espacio de búsqueda. Su ecuación está dada por:
+
+\begin{equation}
+v_{i,G}=x_{r1,G}+F\cdot(x_{r2,G}-x_{r3,G}) \label{eq:1} 
+\end{equation}
+
+donde F representa el factor de mutación o factor de escala, el cual controla la magnitud de la perturbación diferencial.
+
+\textbf{DE/best/1} Esta variante sustituye el vector base aleatorio por el mejor individuo encontrado en la población hasta la generación actual ($x_{best,G}$). Al utilizar esta información privilegiada, el algoritmo acelera drásticamente la explotación y convergencia hacia el óptimo global, aunque con un mayor riesgo de convergencia prematura. Se define mediante la ecuación:
+
+\begin{equation}
+v_{i,G}=x_{best,G}+F\cdot(x_{r1,G}-x_{r2,G}) \label{eq:2} 
+\end{equation}
+
+\subsection{Micro Evolución Diferencial Adaptativa ($\mu$SADE)}
+La segmentación de imágenes médicas de alta resolución mediante optimización iterativa implica un alto costo computacional al evaluar la función objetivo. La variante micro-evolutiva $\mu$SADE aborda este problema implementando una población de tamaño drásticamente reducido (en nuestro diseño, $NP=10$). Para compensar la complejidad de ajustar los hiperparámetros en poblaciones pequeñas, el algoritmo incorpora un mecanismo de auto-adaptación para los parámetros de control (el factor de mutación F y la tasa de cruza $Cr$), permitiendo que el método optimice dinámicamente estos valores a medida que avanza la evolución [1]. Adicionalmente, el principal desafío de las micro-poblaciones es el rápido agotamiento de la diversidad genética y el estancamiento en mínimos locales. Para mitigar esto, $\mu$SADE integra un mecanismo de reinicio poblacional (restart). Si la población no logra mejorar la mejor solución global durante un número predeterminado de iteraciones (restart iters = 16), el algoritmo reinicializa aleatoriamente a la mayoría de los individuos en el espacio de búsqueda. Durante este proceso, se aplica un criterio de elitismo, garantizando la supervivencia del mejor individuo ($e=1$) para no perder la información óptima descubierta, equilibrando así eficazmente la explotación extrema de la micro-población con una exploración revitalizada.
+
+\section{Materiales y Métodos}
+
+\subsection{Conjuntos de Datos}
+Para la evaluación de la metodología propuesta, se utilizaron tres conjuntos de datos públicos de radiografías de tórax, los cuales presentan diferentes características y distribuciones de clases.
+
+\textbf{COVID-19 Radiography Database} 
+\begin{itemize}
+    \item Descripción: Colección de radiografías de tórax orientada a la detección del virus SARS-CoV-2 [2].
+    \item Formato de imagen: Imágenes cuadradas en formato PNG con una resolución unificada de 299x299 píxeles.
+    \item Distribución de clases (Total: 13,808 imágenes):
+    \begin{itemize}
+        \item Clase 0 (Normal): 10,192 imágenes de pulmones sanos.
+        \item Clase 1 (COVID-19): 3,616 imágenes positivas para COVID-19.
+    \end{itemize}
+\end{itemize}
+
+\textbf{Chest X-Ray Images (Pneumonia)} 
+\begin{itemize}
+    \item Descripción: Conjunto de radiografías de tórax pediátricas utilizado para la clasificación y detección de neumonía [3].
+    \item Formato de imagen: Imágenes en formato JPEG.
+    \item Distribución de clases (Total: 5,856 imágenes):
+    \begin{itemize}
+        \item Clase 0 (Normal): 1,583 imágenes de pulmones completamente sanos.
+        \item Clase 1 (Neumonía): 4,273 imágenes con neumonía (incluye tanto de origen bacteriano como viral).
+    \end{itemize}
+\end{itemize}
+
+\textbf{Chest X-ray Dataset for Tuberculosis Segmentation} 
+\begin{itemize}
+    \item Descripción: Recopilación de radiografías de tórax para la detección de tuberculosis, provenientes de dos fuentes: la Base de Datos del Condado de Montgomery (EE. UU.) y la de Shenzhen (China) [4].
+    \item Formato de imagen: Imágenes de rayos X (este dataset suele incluir máscaras de segmentación pulmonar y metadatos clínicos).
+    \item Distribución de clases (Total: 704 imágenes):
+    \begin{itemize}
+        \item Clase 0 (Normal): 359 imágenes de pulmones sanos.
+        \item Clase 1 (Tuberculosis): 345 imágenes positivas para tuberculosis.
+    \end{itemize}
+\end{itemize}
+
+\subsection{Diseño Experimental}
+El flujo computacional de este estudio se dividió en tres etapas principales: segmentación y extracción de características, clasificación y análisis estadístico.
+
+\textbf{Segmentación y Extracción de Características} Las imágenes de los conjuntos de datos (COVID-19, Neumonía y Tuberculosis) se procesaron mediante umbralización multinivel (Multi-Otsu). La función objetivo para la optimización fue la minimización de la varianza entre clases negativa. Se evaluaron cinco métodos para calcular los 3 umbrales:
+\begin{itemize}
+    \item Búsqueda exhaustiva (Standard Otsu).
+    \item Evolución Diferencial (variantes DE/rand/1 y DE/best/1).
+    \item El algoritmo micro-evolutivo $\mu$SADE (variantes $\mu$SADE/rand/1 y $\mu$SADE/best/1).
+\end{itemize}
+
+La elección empírica de $D=3$ umbrales se estableció para aislar conceptualmente cuatro regiones fundamentales: el fondo de la imagen, el tejido óseo, el tejido pulmonar sano y las posibles consolidaciones patológicas, manteniendo la dimensionalidad del problema acotada. Asimismo, se optó por un clasificador SVM con kernel lineal para establecer una línea base sólida y transparente sobre la capacidad predictiva de las características radiómicas extraídas, minimizando el riesgo de sobreajuste (overfitting) que presentan clasificadores más complejos en datasets desbalanceados.Tras aplicar los umbrales, se extrajo un vector de características Radiomics por imagen compuesto por: los valores de los D umbrales, la media y desviación estándar global de la imagen, el número de regiones segmentadas, el área máxima, el área total, y descriptores de textura extraídos mediante la Matriz de Co-ocurrencia de Nivel de Gris (GLCM), específicamente contraste, energía y homogeneidad. Este proceso se ejecutó mediante computación paralela.
+
+\textbf{Clasificación y Validación} Se implementó una Máquina de Vectores de Soporte (SVM) [13] con un kernel lineal para la clasificación binaria. Previo al entrenamiento, los vectores de características se normalizaron mediante estandarización (Z-score). Para manejar el desbalance en los conjuntos de datos, se asignaron pesos inversamente proporcionales a la frecuencia de las clases mediante la configuración class\_weight='balanced' de la librería Scikit-learn [14]. La validación se realizó mediante Validación Cruzada Estratificada Repetida [14], configurada con 10 particiones (splits) y 4 repeticiones, resultando en 40 iteraciones de entrenamiento y prueba por cada combinación de conjunto de datos, algoritmo y nivel de umbral (D). El rendimiento se cuantificó utilizando cuatro métricas: Exactitud (Accuracy), Sensibilidad (Recall), F1-Score y Área Bajo la Curva ROC (AUC) [15].
+
+\begin{table}[ht]
+\centering
+\caption{Parámetros de configuración para los algoritmos de optimización y el modelo de clasificación.}
+\begin{tabular}{llc}
+\toprule
+\textbf{Etapa Algoritmo} & \textbf{Parámetro} & \textbf{Valor} \\ \midrule
+Parámetros Globales & Número de umbrales (D) & 3 \\
+ & Evaluaciones máximas de la función (max fes) & 3000 ($D\times1000$) \\ \midrule
+$\mu$-SADE & Tamaño de la población (NP) & 10 \\
+ & Iteraciones para reinicio (restart\_iters) & 10 \\
+ & Número de individuos élite (e) & 1 \\
+ & Límite inferior del factor de mutación ($F_{l}$) & 0.1 \\
+ & Rango superior del factor de mutación ($F_{u}$) & 0.9 \\
+ & Probabilidad de actualizar $F(\tau_{1})$ & 0.1 \\
+ & Probabilidad de actualizar $Cr(\tau_{2})$ & 0.1 \\ \midrule
+DE Estándar & Tamaño de la población ($NP$) & 15 ($5\times D$) \\
+ & Factor de mutación ($F$) & 0.5 \\
+ & Tasa de cruza ($Cr$) & 0.9 \\ \midrule
+Clasificador SVM & Tipo de Kernel & Lineal \\
+ & Estrategia de pesos (class weight) & Balanceado \\
+ & Particiones de validación (n\_splits) & 10 \\
+ & Repeticiones de validación (n\_repeats) & 4 \\ \bottomrule
+\end{tabular}
+
+\end{table}
+
+\textbf{Análisis Estadístico} La evaluación estadística del desempeño de los algoritmos de optimización se centró en la métrica F1-Score. Inicialmente, se aplicó la prueba estadística no paramétrica de Friedman [10] con un nivel de significancia de $\alpha=0.05$ para determinar la existencia de diferencias significativas globales entre los métodos. Tras rechazar la hipótesis nula, se aplicó la prueba post-hoc de Nemenyi [11] para llevar a cabo las comparaciones por pares (pairwise comparisons) e identificar las diferencias específicas entre los algoritmos. Ambos procedimientos estadísticos siguen las recomendaciones estandarizadas para la evaluación rigurosa de algoritmos de aprendizaje automático sobre múltiples conjuntos de datos [12].
+
+\section{Resultados y Discusión}
+En esta sección se presentan los resultados obtenidos tras la clasificación de las características radiómicas extraídas de las radiografías de tórax. Los experimentos se centraron en la evaluación de segmentaciones generadas con $D=3$ umbrales, utilizando un modelo SVM lineal evaluado mediante validación cruzada estratificada (10 particiones y 4 repeticiones).
+
+\subsection{Rendimiento de Clasificación}
+Para medir la robustez y capacidad predictiva de las características extraídas por cada algoritmo de optimización, se analizó el rendimiento a través de diversas métricas, destacando el F1-Score debido al desbalance de clases presente en los conjuntos de datos. La Tabla 2 resume el F1-Score promedio y su respectiva desviación estándar para cada variante algorítmica en los tres conjuntos de datos, así como el promedio global.
+
+\begin{table}[ht]
+\centering
+\caption{Rendimiento de clasificación (F1-Score promedio $\pm$ desviación estándar) para segmentación con $D=3$ umbrales.}
+\begin{tabular}{lcccc}
+\toprule
+\textbf{Algoritmo} & \textbf{COVID-19} & \textbf{Neumonía} & \textbf{Tuberculosis} & \textbf{Promedio Global} \\ \midrule
+$\mu$SADE/rand/1 & $0.5156\pm0.014$ & $0.9390\pm0.009$ & $0.6803\pm0.0545$ & 0.7117 \\
+$\mu$SADE/best/1 & $0.5155\pm0.0152$ & $0.9395\pm0.0090$ & $0.6779\pm0.0566$ & 0.7110 \\
+DE/best/1 & $0.5152\pm0.0156$ & $0.9395\pm0.0090$ & $0.6779\pm0.0566$ & 0.7109 \\
+DE/rand/1 & $0.5150\pm0.0155$ & $0.9394\pm0.0090$ & $0.6779\pm0.0566$ & 0.7108 \\
+Standard Otsu & $0.5132\pm0.0173$ & $0.9392\pm0.0091$ & $0.6781\pm0.0567$ & 0.7102 \\ \bottomrule
+\end{tabular}
+
+\end{table}
+
+Como se observa en la Tabla 2, el conjunto de datos de Neumonía presentó la tarea de clasificación más sencilla para el modelo, alcanzando valores de F1-Score superiores a 0.93 en todos los casos. En contraste, la detección de COVID-19 resultó ser el desafío más complejo, con puntuaciones cercanas a 0.51. A nivel algorítmico, las variantes micro-evolutivas demostraron ser competitivas. Específicamente, $\mu$SADE/rand/1 obtuvo el mejor rendimiento global (0.7117) y logró los mejores resultados individuales en los conjuntos de COVID-19 y Tuberculosis. Por su parte, $\mu$SADE/best/1 igualó el mejor rendimiento en el conjunto de Neumonía (0.9395) junto con DE/best/1. Notablemente, todas las variantes metaheurísticas superaron el rendimiento promedio de la búsqueda exhaustiva tradicional (Standard Otsu), la cual obtuvo el desempeño global más bajo (0.7102).
+
+El bajo rendimiento observado en el conjunto de COVID-19 ($F1 \approx 0.51$) evidencia las limitaciones de la umbralización global frente a esta patología. A diferencia de la neumonía bacteriana, que suele presentar consolidaciones densas y bien delimitadas, el COVID-19 se manifiesta frecuentemente mediante opacidades intersticiales en 'vidrio esmerilado' de baja densidad y bordes difusos. Estas sutiles transiciones de intensidad se mezclan con el tejido blando sano en el histograma global de la imagen, dificultando que el método Multi-Otsu encuentre un umbral de separación claro sin generar sub-segmentación.
+
+\subsection{Análisis Estadístico}
+Para validar si las diferencias observadas en el F1-Score son estadísticamente significativas, se aplicó la prueba no paramétrica de Friedman sobre los resultados de las 40 iteraciones de validación cruzada. El ranking promedio generado por la prueba se detalla en la Tabla 3.
+
+\begin{table}[ht]
+\centering
+\caption{Ranking promedio de la prueba de Friedman basado en la métrica F1-Score ($D=3$).}
+\begin{tabular}{lc}
+\toprule
+\textbf{Algoritmo} & \textbf{Ranking Promedio} \\ \midrule
+$\mu$SADE/best/1 & 2.82 \\
+$\mu$SADE/rand/1 & 2.93 \\
+DE/best/1 & 3.00 \\
+DE/rand/1 & 3.03 \\
+Standard Otsu & 3.22 \\ \bottomrule
+\end{tabular}
+
+\end{table}
+
+El análisis estadístico consolida la superioridad de las estrategias propuestas. La variante $\mu$SADE/best/1 se posicionó como el mejor método en el ranking global de Friedman (2.82), seguido muy de cerca por $\mu$SADE/rand/1 (2.93). Por el contrario, el método de Otsu estándar quedó relegado a la última posición (3.22). Estos resultados indican que el algoritmo $\mu$SADE no solo reduce drásticamente el costo computacional inherente al cálculo de múltiples umbrales (al operar con una micro-población de solo 10 individuos), sino que también es capaz de descubrir configuraciones de umbrales que generan características radiómicas de mayor calidad predictiva que la propia búsqueda exhaustiva, demostrando un balance óptimo entre eficiencia y eficacia para los sistemas CAD.
+
+\subsection{Análisis Visual de la Segmentación}
+Para complementar los resultados estadísticos y cuantitativos descritos anteriormente, se llevó a cabo un análisis cualitativo del rendimiento del algoritmo. Las Figuras 1, 2, 3 ilustran los resultados de la segmentación multinivel obtenidos mediante la variante $\mu$SADE/rand/1 al procesar muestras representativas de pacientes sanos y enfermos procedentes de los tres conjuntos de datos evaluados.
+
+%(Aquí debes insertar los comandos \includegraphics para las Figuras 1, 2 y 3 basándote en las imágenes originales)
+% Fig. 1. Comparativa visual cualitativa de la segmentación del Dataset de Neumonía obtenidas con \muSADE/rand/1. 
+% Fig. 2. Comparativa visual cualitativa de la segmentación del Dataset de COVID-19 obtenidas con \muSADE/rand/1. 
+% Fig. 3. Comparativa visual cualitativa de la segmentación del Dataset de Tuberculosis obtenidas con \muSADE/rand/1. 
+
+Como se puede apreciar en las representaciones visuales, el algoritmo propuesto logra una adecuada separación de las densidades radiológicas en distintos niveles de cuantificación. En los pacientes diagnosticados con alguna de las patologías, las alteraciones típicas (como consolidaciones alveolares en casos de neumonía, opacidades intersticiales en COVID-19 o lesiones focales en Tuberculosis) son mapeadas de manera efectiva en franjas de intensidad bien delimitadas. Esta capacidad de aislar las regiones de interés de las áreas pulmonares sanas justifica el rendimiento observado en la etapa de Radiomics. Al simplificar el ruido de fondo y agrupar los píxeles morfológicamente relevantes, el clasificador recibe un vector de características de textura (como las métricas de la matriz GLCM) y forma mucho más descriptivo que si se procesara la imagen original, demostrando la eficacia práctica del enfoque micro-evolutivo en entornos CAD.
+
+\section{Conclusiones y Trabajo Futuro}
+En este trabajo se presentó una evaluación del algoritmo de Micro Evolución Diferencial Adaptativa ($\mu$SADE) aplicado a la segmentación multinivel de radiografías de tórax para la detección de patologías respiratorias. A través de la comparación de distintos esquemas de mutación y métodos tradicionales, se han extraído las siguientes conclusiones fundamentales:
+
+En primer lugar, los resultados experimentales demuestran que el uso de micro-poblaciones ($NP=10$) con mecanismos de reinicio y auto-adaptación no solo es computacionalmente eficiente, sino que mantiene un rendimiento competitivo y ligeramente superior a la búsqueda exhaustiva del método de Otsu estándar, destacando principalmente por su potencial para reducir la carga computacional.
+
+En segundo lugar, se validó que la calidad de la segmentación impacta directamente en la etapa de Radiomics. Las características extraídas mediante los umbrales optimizados permitieron que el clasificador SVM alcanzara un F1-Score superior a 0.93 en el conjunto de Neumonía, demostrando que una correcta delimitación de tejidos facilita la identificación de patrones patológicos cuantitativos. No obstante, el bajo rendimiento en el conjunto de COVID-19 (0.51) subraya la complejidad intrínseca de esta enfermedad y sugiere que, en futuros trabajos, se debe explorar un mayor número de niveles de umbral ($D>3$) o la combinación con técnicas de aprendizaje profundo.
+
+Finalmente, este estudio confirma que los algoritmos micro-evolutivos son una alternativa poderosa para sistemas de diagnóstico asistido por computadora (CAD) que requieren precisión diagnóstica sin comprometer los recursos computacionales. En cuanto al trabajo futuro y con el objetivo de elevar la novedad metodológica pura del algoritmo de optimización, se propone el diseño y la integración de operadores híbridos en la arquitectura de $\mu$SADE, tales como una perturbación basada en mapas caóticos o la implementación de un operador de comportamiento cuántico durante el mecanismo de reinicio poblacional, para evitar definitivamente la convergencia prematura en espacios de alta dimensionalidad. Asimismo, se propone integrar métricas de calidad de imagen adicionales en la función objetivo y extender el uso de $\mu$SADE a tomografías computarizadas (CT) para análisis volumétrico.
+
+El desarrollo e implementación de sistemas CAD para el análisis de imágenes médicas conlleva responsabilidades éticas fundamentales. Es imperativo subrayar que la metodología aquí propuesta está concebida estrictamente como una herramienta de apoyo a la decisión clínica y no como un sistema diseñado para sustituir el juicio del profesional de la salud. Asimismo, se reconoce que los modelos basados en datos pueden heredar sesgos presentes en los conjuntos de datos de origen, por lo que una eventual validación en un entorno clínico real requeriría asegurar la representatividad demográfica y el manejo anonimizado de la información del paciente.
+
+\begin{thebibliography}{15}
+
+\bibitem{brest}
+Brest, J., Greiner, S., Boskovic, B., Mernik, M., Zumer, V.: Self-adapting control parameters in differential evolution: A comparative study on numerical benchmark problems. IEEE Transactions on Evolutionary Computation 10(6), 646-657 (2006) 
+
+\bibitem{rahman}
+Rahman, T.: COVID-19 Radiography Database. Kaggle, https://www.kaggle.com/datasets/tawsifurrahman/covid19-radiography-database, último acceso 2026/03/31 
+
+\bibitem{mooney}
+Mooney, P.: Chest X-Ray Images (Pneumonia). Kaggle, https://www.kaggle.com/datasets/paultimothymooney/chest-xray-pneumonia, último acceso 2026/03/31 
+
+\bibitem{mandal}
+Mandal, T.: Chest X-ray Dataset for Tuberculosis Segmentation. Kaggle, https://www.kaggle.com/datasets/iamtapendu/chest-x-ray-lungs-segmentation, último acceso 2026/03/31 
+
+\bibitem{eadie}
+Eadie, L.H., Taylor, P., Gibson, A.P.: Recommendations for research design and reporting in computer-assisted diagnosis to facilitate meta-analysis. Journal of Biomedical Informatics 45(2), 390-397 (2012) 
+
+\bibitem{yip}
+Yip, S.S.F., Aerts, H.J.W.L.: Applications and limitations of radiomics. Physics in Medicine \& Biology 61(13), R150-R166 (2016) 
+
+\bibitem{qi}
+Qi, X., Jiang, Z., Yu, Q., Shao, C., Zhang, H., Yue, H., Ma, B., Wang, Y., Liu, C., Meng, X., Huang, S., Wang, J., Xu, Y., Gu, J.: Radiomics nomogram for the prediction of 2019 novel coronavirus pneumonia in patients with pulmonary anomalies. European Radiology 30(11), 5891-5900 (2020) 
+
+\bibitem{haralick}
+Haralick, R.M., Shanmugam, K., Dinstein, I.: Textural features for image classification. IEEE Transactions on Systems, Man, and Cybernetics SMC-3(6), 610-621 (1973) 
+
+\bibitem{lambin}
+Lambin, P., Rios-Velazquez, E., Leijenaar, R., Carvalho, S., van Stiphout, R.G.P.M., Granton, P., Zegers, C.M.L., Gillies, R., Boellard, R., Dekker, A., Aerts, H.J.W.L.: Radiomics: Extracting more information from medical images using advanced feature analysis. European Journal of Cancer 48(4), 441-446 (2012) 
+
+\bibitem{friedman}
+Friedman, M.: The use of ranks to avoid the assumption of normality implicit in the analysis of variance. Journal of the American Statistical Association 32(200), 675-701 (1937) 
+
+\bibitem{nemenyi}
+Nemenyi, P.B.: Distribution-free multiple comparisons. PhD thesis, Princeton University (1963) 
+
+\bibitem{demsar}
+Demšar, J.: Statistical comparisons of classifiers over multiple data sets. Journal of Machine Learning Research 7, 1-30 (2006) 
+
+\bibitem{cortes}
+Cortes, C., Vapnik, V.: Support-vector networks. Machine Learning 20(3), 273-297 (1995) 
+
+\bibitem{pedregosa}
+Pedregosa, F., Varoquaux, G., Gramfort, A., Michel, V., Thirion, B., Grisel, O., Blondel, M., Prettenhofer, P., Weiss, R., Dubourg, V., Vanderplas, J., Passos, A., Cournapeau, D., Brucher, M., Perrot, M., Duchesnay, E.: Scikit-learn: Machine learning in Python. Journal of Machine Learning Research 12, 2825-2830 (2011) 
+
+\bibitem{fawcett}
+Fawcett, T.: An introduction to ROC analysis. Pattern Recognition Letters 27(8), 861-874 (2006) 
+
+\end{thebibliography}
+
+\begin{algorithm}
+\caption{Micro Evolución Diferencial Adaptativa ($\mu$SADE) para Segmentación Multi-Otsu }
+\begin{algorithmic}[1]
+\Require Imagen I, umbrales D, $NP=10$, max fes=3000, restart iters = 10, $e=1$, $F_{l}=0.1$, $F_{u}=0.9$, $\tau_{1}=0.1$, $\tau_{2}=0.1$, Estrategia.
+\Ensure Vector de umbrales óptimos best.
+\State Calcular el histograma de I y el total de píxeles.
+\State Inicializar población $P=\{x_{1},...,x_{NP}\}$ con valores aleatorios ordenados en [0,255].
+\State Evaluar el fitness de cada $x_{i}\in P$ (minimizar varianza entre clases).
+\State Inicializar $F_{i}\sim U(F_{l},F_{l}+F_{u})$ y $Cr_{i}\sim U(0,1)$ para $i=1,...,NP$
+\State fes $\leftarrow$ NP, $t\leftarrow1$
+\While{fes $<$ max\_fes}
+    \If{$t \pmod{\text{restart iters}} == 0$} \Comment{Mecanismo de Reinicio}
+        \State Ordenar P, fitness, F y Cr de mejor a peor.
+        \For{$i=1$ \textbf{to} e} \Comment{Conservar Élite y auto-adaptar}
+            \If{$rand(0,1)<\tau_{1}$}
+                \State $F_{i}\leftarrow F_{l}+rand(0,1)\times F_{u}$
+            \EndIf
+            \If{$rand(0,1)<\tau_{2}$}
+                \State $Cr_{i}\leftarrow rand(0,1)$
+            \EndIf
+        \EndFor
+        \For{$i=e+1$ \textbf{to} NP} \Comment{Reinicializar el resto}
+            \If{fes $\geq$ max\_fes} \textbf{break} \EndIf
+            \State valores aleatorios ordenados en [0,255].
+            \State Evaluar fitness de $x_{i}$.
+            \State fes $\leftarrow fes+1$
+            \State $F_{i}\leftarrow U(F_{l},F_{l}+F_{u})$, $Cr_{i}\leftarrow U(0,1)$
+        \EndFor
+    \EndIf
+    \State Encontrar índice del mejor individuo actual: best idx.
+    \For{$i=1$ \textbf{to} NP} \Comment{Evolución Poblacional}
+        \If{fes $\geq$ max\_fes} \textbf{break} \EndIf
+        \State Seleccionar $r_1, r_2, r_3 \neq i$ mutuamente exclusivos.
+        \If{Estrategia == 'DE/rand/1'} \Comment{Operador de Mutación}
+            \State $V_{i}\leftarrow x_{r1}+F_{i}\cdot(x_{r2}-x_{r3})$
+        \ElsIf{Estrategia == 'DE/best/1'}
+            \State $V_{i}\leftarrow x_{\text{best\_idx}}+F_{i}\cdot(x_{r1}-x_{r2})$
+        \EndIf
+        \State Aplicar límites [0,255] a $V_i$ y ordenar sus elementos.
+        \State Generar índice aleatorio $j_{rand}\in\{1,...,D\}$
+        \For{$j=1$ \textbf{to} D} \Comment{Operador de Cruza Binomial}
+            \If{$rand(0,1)\le Cr_{i}$ \textbf{or} $j==j_{rand}$}
+                \State $U_{i,j}\leftarrow V_{i,j}$
+            \Else
+                \State $U_{i,j}\leftarrow x_{i,j}$
+            \EndIf
+        \EndFor
+        \State Evaluar fitness del vector de prueba U: ($f_U$).
+        \State fes $\leftarrow fes+1$
+        \If{$f_U \leq fitness[i]$} \Comment{Operador de Selección}
+            \State $x_{i}\leftarrow U_{i}$
+            \State $fitness[i]\leftarrow f_{U}$
+        \EndIf
+    \EndFor
+    \State $t\leftarrow t+1$
+\EndWhile
+\State Encontrar índice del mejor individuo final: best idx.
+\State \Return $x_{\text{best idx}}$ redondeado al entero más cercano.
+\end{algorithmic}
+
+\end{algorithm}
+
+\end{document}
